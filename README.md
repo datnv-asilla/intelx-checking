@@ -133,21 +133,31 @@ _All checked URLs are stable_
 
 ## 🚀 Cài đặt
 
-### 1. Clone repository
+### Option 1: Chạy trực tiếp với Python (Cũ)
+
+#### 1. Clone repository
 ```bash
 git clone <repository-url> intelx-checking
 cd intelx-checking
 ```
 
-### 2. Cài đặt dependencies
+### Option 1: Chạy trực tiếp với Python (Cũ)
+
+#### 1. Clone repository
+```bash
+git clone <repository-url> intelx-checking
+cd intelx-checking
+```
+
+#### 2. Cài đặt dependencies
 ```bash
 pip3 install -r requirements.txt
 ```
 
-### 3. Cấu hình environment variables
+#### 3. Cấu hình environment variables
 ```bash
 cp .env.example .env
-nano .env
+vim .env
 ```
 
 Điền các giá trị:
@@ -156,6 +166,144 @@ INTELX_API_KEY=your_intelx_api_key_here
 SLACK_TOKEN=xoxb-your-slack-bot-token
 SLACK_CHANNEL_ID=C0A21V42A64
 ```
+
+#### 4. Cấu hình URLs cần check
+Mở `database.json` và thêm URLs (nếu chưa có):
+```json
+{
+  "LIST_CHECK_URL": [
+    "asilla.jp",
+    "example@asilla.jp",
+    "..."
+  ],
+  "done_check_urls": []
+}
+```
+
+---
+
+## 🐳 Docker Architecture
+
+### Files cấu trúc
+```
+intelx-checking/
+├── Dockerfile              # Docker image definition
+├── docker-compose.yml      # Docker Compose config
+├── .dockerignore          # Files bỏ qua khi build
+├── run_docker_cron.sh     # Script chạy container (được gọi bởi cron)
+└── setup_docker_cron.sh   # Script setup cronjob
+```
+
+### Dockerfile
+- Base image: `python:3.11-slim`
+- Install dependencies từ `requirements.txt`
+- Copy source code và `database.json`
+- Volume mount cho `intelx_history.json` và `database.json` để persist data
+
+### docker-compose.yml
+- Service: `intelx-checker`
+- Load `.env` file tự động
+- Mount volumes để data không bị mất sau khi container stop
+- Network isolation
+
+### Volume mounts
+```yaml
+volumes:
+  - ./database.json:/app/database.json          # Progress tracking
+  - ./intelx_history.json:/app/intelx_history.json  # Scan history
+```
+
+**Data persistence:** Mọi thay đổi trong container sẽ được lưu vào host machine, không bị mất sau khi container dừng.
+
+---
+
+## 📁 File Configuration
+```bash
+chmod +x setup_cron.sh
+./setup_cron.sh
+```
+
+---
+
+### Option 2: Docker + Cronjob (Khuyến nghị) 🐳
+
+**Ưu điểm:**
+- ✅ Môi trường cô lập, không ảnh hưởng hệ thống
+- ✅ Dễ deploy trên bất kỳ máy nào có Docker
+- ✅ Không cần cài Python dependencies thủ công
+- ✅ Volume mount để persist data giữa các lần chạy
+
+#### 1. Clone repository
+```bash
+git clone <repository-url> intelx-checking
+cd intelx-checking
+```
+
+#### 2. Cấu hình environment variables
+```bash
+cp .env.example .env
+vim .env
+```
+
+Điền các giá trị:
+```env
+INTELX_API_KEY=your_intelx_api_key_here
+SLACK_TOKEN=xoxb-your-slack-bot-token
+SLACK_CHANNEL_ID=C0A21V42A64
+```
+
+#### 3. Cấu hình URLs cần check
+Mở `database.json` và thêm URLs:
+```json
+{
+  "LIST_CHECK_URL": [
+    "asilla.jp",
+    "example@asilla.jp"
+  ],
+  "done_check_urls": []
+}
+```
+
+#### 4. Build và test Docker image
+```bash
+# Build image
+docker-compose build
+
+# Test chạy thủ công
+docker-compose up
+```
+
+#### 5. Setup cronjob (tự động chạy 9h sáng thứ 2 hàng tuần)
+```bash
+chmod +x setup_docker_cron.sh run_docker_cron.sh
+./setup_docker_cron.sh
+```
+
+#### 6. Kiểm tra cronjob
+```bash
+# Xem cronjob đã được tạo
+crontab -l | grep intelx
+
+# Xem logs
+tail -f logs/cron.log
+
+# Test chạy thủ công
+./run_docker_cron.sh
+```
+
+**Lịch chạy:** Mỗi thứ 2 lúc 9:00 sáng (Cron: `0 9 * * 1`)
+
+**Thay đổi lịch chạy:**
+Chỉnh sửa file `setup_docker_cron.sh`, dòng:
+```bash
+# Ví dụ khác:
+# 0 9 * * 1    # Thứ 2 lúc 9h sáng (hiện tại)
+# 0 2 * * *    # Hàng ngày lúc 2h sáng
+# 0 9 * * 2,4  # Thứ 3 và thứ 5 lúc 9h sáng
+# 0 */6 * * *  # Mỗi 6 tiếng
+```
+
+---
 
 ### 4. Cấu hình URLs cần check
 Mở `database.json` và thêm URLs vào `LIST_CHECK_URL`:
