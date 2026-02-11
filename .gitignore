@@ -1,5 +1,6 @@
 .env
 intelx_history.json
+database.json
 
 # Docker logs
 logs/
