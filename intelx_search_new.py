@@ -3,28 +3,20 @@ import json
 import time
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configuration
-INTELX_API_KEY = "761872e1-0820-4d3d-8126-757d428abf62"
 INTELX_API_ROOT = "https://free.intelx.io"  # Free tier API endpoint
 HISTORY_FILE = "intelx_history.json"
+DATABASE_FILE = "database.json"
 
-LIST_CHECK_URL = [
-    "asilla.net",
-    "asilla.com",
-    "asilla.jp",
-    "card.asilla.com",
-    "opd-staging.asilla.space",
-    "operation-dashboard-dev.asilla.space",
-    "solar-management.asilla.com",
-    "wcm-staging.asilla.space",
-    "wmcdev.asilla.space",
-    "biz.asilla.jp",
-    "staging.asilla.space",
-    "cloud-qc.asilla.space",
-    "dev.asilla.space"
-]
-
+# Load single API key from environment variable
+INTELX_API_KEY = os.getenv('INTELX_API_KEY', '')
+if not INTELX_API_KEY:
+    raise ValueError("INTELX_API_KEY not found in .env file")
 
 class IntelXAPI:
     """IntelX API Client based on official SDK"""
@@ -93,9 +85,6 @@ class IntelXAPI:
         print(f"[+] Searching for: {term}")
         response = self._post('/intelligent/search', json_data=payload)
         
-        if not response:
-            return None
-        
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 0:
@@ -104,6 +93,7 @@ class IntelXAPI:
                 return search_id
             else:
                 print(f"[-] Search status error: {data.get('status')}")
+                print(f"[-] Response: {data}")
                 return None
         elif response.status_code == 401:
             print(f"[-] Error 401: Invalid API key")
@@ -111,8 +101,15 @@ class IntelXAPI:
         elif response.status_code == 402:
             print(f"[-] Error 402: Payment required / Quota exceeded")
             return 402
+        elif response.status_code == 429:
+            print(f"[-] Error 429: Rate limit exceeded")
+            return 429
         else:
             print(f"[-] HTTP Error {response.status_code}")
+            try:
+                print(f"[-] Response body: {response.text[:200]}")
+            except:
+                pass
             return response.status_code
     
     def intelligent_search_result(self, search_id, limit=100):
@@ -188,7 +185,6 @@ class IntelXAPI:
 
 def send_slack(data):
     """Send message to Slack"""
-    import os
     SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID", "C0A21V42A64")
     ENDPOINT = "https://slack.com/api/chat.postMessage"
     SLACK_TOKEN = os.environ.get("SLACK_TOKEN")
@@ -234,6 +230,44 @@ def save_history(history):
             json.dump(history, f, indent=2)
     except Exception as e:
         print(f"[-] Error saving history: {e}")
+
+
+def load_progress():
+    """Load progress file to track completed URLs"""
+    if os.path.exists(DATABASE_FILE):
+        try:
+            with open(DATABASE_FILE, 'r') as f:
+                data = json.load(f)
+                # Ensure both fields exist
+                if 'LIST_CHECK_URL' not in data:
+                    data['LIST_CHECK_URL'] = []
+                if 'done_check_urls' not in data:
+                    data['done_check_urls'] = []
+                return data
+        except:
+            return {'LIST_CHECK_URL': [], 'done_check_urls': []}
+    return {'LIST_CHECK_URL': [], 'done_check_urls': []}
+
+
+def save_progress(progress):
+    """Save progress to file"""
+    try:
+        with open(DATABASE_FILE, 'w') as f:
+            json.dump(progress, f, indent=2)
+        total_urls = len(progress.get('LIST_CHECK_URL', []))
+        done_urls = len(progress.get('done_check_urls', []))
+        print(f"[+] Progress saved: {done_urls}/{total_urls} URLs completed")
+    except Exception as e:
+        print(f"[-] Error saving progress: {e}")
+
+
+def reset_progress():
+    """Reset progress when all URLs are checked"""
+    progress = load_progress()
+    progress['done_check_urls'] = []
+    save_progress(progress)
+    print("[+] Progress reset - starting new cycle")
+    return progress
 
 
 def compare_results(url, current_stats, previous_stats):
@@ -293,28 +327,78 @@ def compare_results(url, current_stats, previous_stats):
 if __name__ == "__main__":
     check_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     history = load_history()
-    current_scan = {}
+    progress = load_progress()
+    current_scan = {}  # Will be saved at the end
+    
+    # Get LIST_CHECK_URL from database.json
+    LIST_CHECK_URL = progress.get('LIST_CHECK_URL', [])
+    if not LIST_CHECK_URL:
+        raise ValueError("LIST_CHECK_URL not found in database.json")
+    
+    # Get list of URLs that need to be checked
+    done_urls = set(progress.get('done_check_urls', []))
+    remaining_urls = [url for url in LIST_CHECK_URL if url not in done_urls]
+    
+    # If all URLs are done, reset and start new cycle
+    if not remaining_urls:
+        print("[+] All URLs completed in previous cycle. Starting new cycle...")
+        progress = reset_progress()
+        done_urls = set(progress.get('done_check_urls', []))  # Update done_urls after reset
+        remaining_urls = LIST_CHECK_URL.copy()
+    
+    print(f"[+] Total URLs to check: {len(LIST_CHECK_URL)}")
+    print(f"[+] Already checked: {len(done_urls)}")
+    print(f"[+] Remaining: {len(remaining_urls)}")
+    print(f"[+] Will scan up to 50 URLs today\n")
     
     # Initialize IntelX API client
     api = IntelXAPI(INTELX_API_KEY)
     
     # Track changes for summary
-    total_urls = len(LIST_CHECK_URL)
     urls_with_changes = 0
     urls_checked = 0
+    max_daily_checks = 50  # Free tier limit
     
-    for url in LIST_CHECK_URL:
+    for url in remaining_urls:
+        # Stop if reached daily limit
+        if urls_checked >= max_daily_checks:
+            print(f"\n[!] Reached daily limit of {max_daily_checks} checks")
+            print(f"[!] Will continue tomorrow with remaining {len(remaining_urls) - urls_checked} URLs")
+            break
+        
         print(f"\n{'='*60}")
         print(f"[+] Check Date: {check_date}")
+        print(f"[+] Progress: {len(done_urls) + urls_checked + 1}/{len(LIST_CHECK_URL)}")
         print(f"[+] Checking URL: {url}")
         print(f"{'='*60}")
         
-        # Search using new API
+        # Search using API
         search_id = api.intelligent_search(url, maxresults=100, timeout=5, sort=4)
+        
+        # Handle API errors
+        if isinstance(search_id, int):
+            if search_id == 402:
+                print(f"[!] API key quota exceeded (402)")
+                print(f"[!] Checked {urls_checked} URLs today. Will continue tomorrow.")
+                break
+            elif search_id == 429:
+                print(f"[!] Rate limit exceeded (429). Waiting 60 seconds...")
+                time.sleep(60)
+                search_id = api.intelligent_search(url, maxresults=100, timeout=5, sort=4)
+                if isinstance(search_id, int):
+                    print(f"[-] Still rate limited. Skipping for now.")
+                    continue
+            elif search_id == 401:
+                print(f"[!] Invalid API key (401). Please check your .env file.")
+                break
+            else:
+                print(f"[-] Search failed with error code: {search_id}")
+                continue
         
         if search_id and not isinstance(search_id, int):
             urls_checked += 1
-            # Get statistics using new API
+            
+            # Get statistics using API
             stats = api.get_statistics(search_id)
             if stats:
                 media_stats = stats.get('media', [])
@@ -330,8 +414,7 @@ if __name__ == "__main__":
                     # Check if this is first scan or data was removed
                     previous_stats = history.get(url, {}).get('media', None)
                     
-                    if previous_stats is None:
-                        # First time scanning this domain
+                    if previous_stats is None or len(previous_stats) == 0:
                         print(f"\n[+] URL: {url}")
                         print(f"[+] Status: No data found (first scan)")
                         print(f"[✓] Saved empty state - skipped Slack notification")
@@ -343,79 +426,84 @@ if __name__ == "__main__":
                         print(f"\n{result_message}")
                         send_slack(result_message)
                         print(f"[✓] Data removed - sent to Slack")
-                    else:
-                        # Still no data (same as before)
-                        print(f"\n[+] URL: {url}")
-                        print(f"[+] Status: No data found (unchanged)")
-                        print(f"[✓] No changes - skipped Slack notification")
-                    
-                    continue
-                
-                # Save current scan data (with data)
-                current_scan[url] = {
-                    'date': check_date,
-                    'media': media_stats
-                }
-                
-                # Compare with previous scan
-                previous_stats = history.get(url, {}).get('media', None)
-                comparison, has_changes, is_first_scan = compare_results(url, media_stats, previous_stats)
-                
-                # Always print to console
-                print(f"\n[+] URL: {url}")
-                print(f"[+] Current data: {', '.join(f'{item['count']} {item['mediah']}' for item in media_stats)}")
-                print(f"[+] Status: {comparison}")
-                
-                # Only send to Slack if there are changes
-                if has_changes:
-                    urls_with_changes += 1
-                    # Build compact message for Slack (only changes)
-                    if is_first_scan:
-                        # First scan: send summary
-                        summary_parts = [f"{item['count']} {item['mediah']}" 
-                                       for item in media_stats 
-                                       if item.get('count', 0) > 0 and item.get('mediah', '')]
-                        
-                        result_message = f"*🔍 IntelX Alert - {check_date}*\n"
-                        result_message += f"URL: `{url}`\n"
-                        result_message += f"📊 Found: {', '.join(summary_parts)}\n"
-                        result_message += f"Status: {comparison}"
-                    else:
-                        # Subsequent scans: only send changes
-                        result_message = f"*⚠️ IntelX Change Detected - {check_date}*\n"
-                        result_message += f"URL: `{url}`\n"
-                        result_message += f"{comparison}"
-                    
-                    send_slack(result_message)
-                    print("[✓] Changes detected - sent to Slack")
                 else:
-                    print("[✓] No changes - skipped Slack notification")
+                    # Get previous stats before updating
+                    previous_stats = history.get(url, {}).get('media', None)
+                    
+                    # Save current scan data (with data) to current_scan
+                    current_scan[url] = {
+                        'date': check_date,
+                        'media': media_stats
+                    }
+                    
+                    # Compare with previous scan
+                    comparison, has_changes, is_first_scan = compare_results(url, media_stats, previous_stats)
+                    
+                    # Always print to console
+                    print(f"\n[+] URL: {url}")
+                    current_data = ', '.join([f"{item['count']} {item['mediah']}" for item in media_stats])
+                    print(f"[+] Current data: {current_data}")
+                    print(f"[+] Status: {comparison}")
+                    
+                    # Only send to Slack if there are changes
+                    if has_changes:
+                        urls_with_changes += 1
+                        if is_first_scan:
+                            summary_parts = [f"{item['count']} {item['mediah']}" 
+                                           for item in media_stats 
+                                           if item.get('count', 0) > 0 and item.get('mediah', '')]
+                            
+                            result_message = f"*🔍 IntelX Alert - {check_date}*\n"
+                            result_message += f"URL: `{url}`\n"
+                            result_message += f"📊 Found: {', '.join(summary_parts)}\n"
+                            result_message += f"Status: {comparison}"
+                        else:
+                            result_message = f"*⚠️ IntelX Change Detected - {check_date}*\n"
+                            result_message += f"URL: `{url}`\n"
+                            result_message += f"{comparison}"
+                        
+                        send_slack(result_message)
+                        print("[✓] Changes detected - sent to Slack")
+                    else:
+                        print("[✓] No changes - skipped Slack notification")
             else:
                 print("[-] Could not get statistics")
+            
+            # Mark URL as done and save progress
+            progress['done_check_urls'].append(url)
+            save_progress(progress)
         else:
-            print("[-] Search failed")
+            print(f"[-] Search failed (search_id: {search_id})")
         
         # Sleep between requests to avoid rate limiting
         time.sleep(2)
     
-    # Save current scan to history
+    # Merge current scan into history and save once
     if current_scan:
-        save_history(current_scan)
+        history.update(current_scan)
+        save_history(history)
+        print(f"[+] Updated history with {len(current_scan)} URLs")
     
     # Send daily summary to Slack
-    print(f"\n[✔] Done! Checked {len(LIST_CHECK_URL)} URLs")
+    print(f"\n[✔] Done! Checked {urls_checked} URLs today")
     print(f"[✔] History saved to {HISTORY_FILE}")
+    print(f"[✔] Progress: {len(progress['done_check_urls'])}/{len(LIST_CHECK_URL)} total")
     
     # Build and send summary message
-    summary_message = f"*✅ IntelX Daily Scan Complete - {check_date}*\n"
-    summary_message += f"📊 Scanned: {urls_checked}/{total_urls} domains\n"
+    summary_message = f"*✅ IntelX Daily Scan - {check_date}*\n"
+    summary_message += f"📊 Checked today: {urls_checked} URLs\n"
+    summary_message += f"📈 Progress: {len(progress['done_check_urls'])}/{len(LIST_CHECK_URL)} total\n"
     
     if urls_with_changes > 0:
-        summary_message += f"⚠️ Changes detected: {urls_with_changes} domain(s)\n"
+        summary_message += f"⚠️ Changes detected: {urls_with_changes} URL(s)\n"
         summary_message += f"_Check above messages for details_"
     else:
         summary_message += f"✅ No changes detected\n"
-        summary_message += f"_All domains are stable_"
+        summary_message += f"_All checked URLs are stable_"
+    
+    # Check if cycle is complete
+    if len(progress['done_check_urls']) >= len(LIST_CHECK_URL):
+        summary_message += f"\n\n🎉 *Cycle Complete!* All {len(LIST_CHECK_URL)} URLs checked. Will reset tomorrow."
     
     send_slack(summary_message)
     print("[✓] Daily summary sent to Slack")
