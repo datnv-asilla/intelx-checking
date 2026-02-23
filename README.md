@@ -133,31 +133,21 @@ _All checked URLs are stable_
 
 ## 🚀 Cài đặt
 
-### Option 1: Chạy trực tiếp với Python (Cũ)
-
-#### 1. Clone repository
+### 1. Clone repository
 ```bash
 git clone <repository-url> intelx-checking
 cd intelx-checking
 ```
 
-### Option 1: Chạy trực tiếp với Python (Cũ)
-
-#### 1. Clone repository
-```bash
-git clone <repository-url> intelx-checking
-cd intelx-checking
-```
-
-#### 2. Cài đặt dependencies
+### 2. Cài đặt dependencies
 ```bash
 pip3 install -r requirements.txt
 ```
 
-#### 3. Cấu hình environment variables
+### 3. Cấu hình environment variables
 ```bash
 cp .env.example .env
-vim .env
+nano .env
 ```
 
 Điền các giá trị:
@@ -167,8 +157,8 @@ SLACK_TOKEN=xoxb-your-slack-bot-token
 SLACK_CHANNEL_ID=C0A21V42A64
 ```
 
-#### 4. Cấu hình URLs cần check
-Mở `database.json` và thêm URLs (nếu chưa có):
+### 4. Cấu hình URLs cần check
+Mở `database.json` và thêm URLs:
 ```json
 {
   "LIST_CHECK_URL": [
@@ -180,24 +170,46 @@ Mở `database.json` và thêm URLs (nếu chưa có):
 }
 ```
 
+### 5. Test chạy thử
+```bash
+python3 intelx_search_new.py
+```
+
+### 6. Setup cronjob (tự động chạy hàng ngày 9h sáng)
+```bash
+chmod +x setup_cron.sh
+./setup_cron.sh
+```
+
+**Lịch chạy:** Hàng ngày lúc 9:00 sáng
+
+**Xem logs:**
+```bash
+# Xem logs hôm nay
+tail -f logs/cron_$(date +%Y-%m-%d).log
+
+# Xem logs ngày khác
+cat logs/cron_2026-02-22.log
+
+# List tất cả logs
+ls -lh logs/
+```
+
+**Kiểm tra cronjob:**
+```bash
+# Xem cronjob đã setup
+crontab -l | grep intelx
+
+# Chỉnh sửa cronjob
+crontab -e
+
+# Xóa cronjob
+crontab -e  # Xóa dòng chứa intelx
+```
+
 ---
 
-## 🐳 Docker Architecture
-
-### Files cấu trúc
-```
-intelx-checking/
-├── Dockerfile              # Docker image definition
-├── docker-compose.yml      # Docker Compose config
-├── .dockerignore          # Files bỏ qua khi build
-├── run_docker_cron.sh     # Script chạy container (được gọi bởi cron)
-└── setup_docker_cron.sh   # Script setup cronjob
-```
-
-### Dockerfile
-- Base image: `python:3.11-slim`
-- Install dependencies từ `requirements.txt`
-- Copy source code và `database.json`
+## 📁 File Configuration
 - Volume mount cho `intelx_history.json` và `database.json` để persist data
 
 ### docker-compose.yml

@@ -1,25 +1,42 @@
 #!/bin/bash
-# Setup cron job for IntelX daily scan
 
-SCRIPT_DIR="/home/asilla/Asilla/IntelX-checking"
-SCRIPT_NAME="intelx_search_new.py"
-LOG_FILE="$SCRIPT_DIR/intelx_cron.log"
+# Script to setup cronjob for IntelX checker
+# Run daily at 9:00 AM
 
-# Create cron job to run daily at 9:00 AM Vietnam Time
-# Server timezone: Asia/Ho_Chi_Minh (UTC+7)
-# Cron runs in local time, so 9 AM = 9:00 Vietnam Time
-CRON_JOB="0 9 * * * cd $SCRIPT_DIR && /usr/bin/python3 $SCRIPT_NAME >> $LOG_FILE 2>&1"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PYTHON_SCRIPT="$SCRIPT_DIR/intelx_search_new.py"
+LOG_DIR="$SCRIPT_DIR/logs"
 
-# Check if cron job already exists
-(crontab -l 2>/dev/null | grep -F "$SCRIPT_NAME") && echo "Cron job already exists" && exit 0
+# Create logs directory
+mkdir -p "$LOG_DIR"
 
-# Add cron job
-(crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+# Find Python3 path
+PYTHON_PATH=$(which python3)
 
-echo "✓ Cron job added successfully!"
-echo "Script will run daily at 9:00 AM Vietnam Time"
-echo "Server timezone: $(timedatectl | grep 'Time zone' | awk '{print $3, $4}')"
-echo "Log file: $LOG_FILE"
+# Backup current crontab
+crontab -l > /tmp/crontab_backup_$(date +%Y%m%d_%H%M%S).txt 2>/dev/null
+
+# Remove existing IntelX cron jobs
+crontab -l 2>/dev/null | grep -v "intelx_search_new.py" | grep -v "intelx-checking" > /tmp/crontab_new.txt
+
+# Add new cron job - Daily at 9:00 AM with date-based logging
+echo "0 9 * * * cd $SCRIPT_DIR && $PYTHON_PATH $PYTHON_SCRIPT >> $LOG_DIR/cron_\$(date +\\%Y-\\%m-\\%d).log 2>&1" >> /tmp/crontab_new.txt
+
+# Install new crontab
+crontab /tmp/crontab_new.txt
+
+# Clean up
+rm /tmp/crontab_new.txt
+
+echo "✅ Cron job setup complete!"
 echo ""
-echo "To view cron jobs: crontab -l"
-echo "To remove cron job: crontab -e (then delete the line)"
+echo "Scheduled to run: Daily at 9:00 AM"
+echo "Script location: $PYTHON_SCRIPT"
+echo "Python path: $PYTHON_PATH"
+echo "Logs directory: $LOG_DIR/cron_YYYY-MM-DD.log"
+echo ""
+echo "Current crontab:"
+crontab -l | grep "intelx"
+echo ""
+echo "To view logs: tail -f $LOG_DIR/cron_\$(date +%Y-%m-%d).log"
+echo "To test manually: cd $SCRIPT_DIR && python3 intelx_search_new.py"
