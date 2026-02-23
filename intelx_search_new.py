@@ -410,22 +410,9 @@ if __name__ == "__main__":
                         'date': check_date,
                         'media': []
                     }
-                    
-                    # Check if this is first scan or data was removed
-                    previous_stats = history.get(url, {}).get('media', None)
-                    
-                    if previous_stats is None or len(previous_stats) == 0:
-                        print(f"\n[+] URL: {url}")
-                        print(f"[+] Status: No data found (first scan)")
-                        print(f"[✓] Saved empty state - skipped Slack notification")
-                    elif len(previous_stats) > 0:
-                        # Data was removed!
-                        result_message = f"*✅ IntelX Good News - {check_date}*\n"
-                        result_message += f"URL: `{url}`\n"
-                        result_message += f"🎉 All data removed! (was {len(previous_stats)} bucket types)"
-                        print(f"\n{result_message}")
-                        send_slack(result_message)
-                        print(f"[✓] Data removed - sent to Slack")
+                    print(f"\n[+] URL: {url}")
+                    print(f"[+] Status: No data found")
+                    print(f"[✓] Saved empty state - skipped Slack notification")
                 else:
                     # Get previous stats before updating
                     previous_stats = history.get(url, {}).get('media', None)
